@@ -4,7 +4,45 @@ import models.network as network
 import models.loss as loss
 import torch.nn.functional as F
 
-def load_cfg():
+# Data
+from dataset.dataset import GreatApeDataset
+from torch.utils.data import DataLoader
+
+def load_dataset_cfg():
+    
+    cfg = {
+         'dataset': 
+            {
+                'sample_interval': 5,
+                'sequence_length': 10,
+                'activity_duration_threshold':72
+            },
+          'paths': 
+            {
+                'frames':'/home/dl18206/Desktop/phd/code/personal/ape-behaviour-triplet-network/data/frames',
+                'annotations':'/home/dl18206/Desktop/phd/code/personal/ape-behaviour-triplet-network/data/annotations',
+
+            },
+            'augmentation':
+            {
+                "probability": 0,
+                "spatial":
+                {
+                    "colour_jitter": False,
+                    "horizontal_flip": False,
+                    "rotation": False
+                },
+                "temporal": 
+                {
+                    "horizontal_flip": False
+                }
+            }
+        }
+    
+    return cfg
+
+
+def load_model_cfg():
     
     cfg = {
         "name": "twostream_LSTM",
@@ -62,15 +100,36 @@ def load_weights(model, weights_path):
 
     return model
 
-
-
-
 def main():
      
-    cfg = load_cfg()
+    cfg = load_model_cfg()
     device = get_device()
     model = load_model(cfg, device)
     fitted_model = load_weights(model, 'weights/twostream_LSTM/model')
 
+    video_names = '/home/dl18206/Desktop/phd/code/personal/ape-behaviour-triplet-network/splits/valdata.txt'
+    classes_path = '/home/dl18206/Desktop/phd/code/personal/ape-behaviour-triplet-network/classes.txt'
+    classes = open(classes_path).read().strip().split()
+    
+    # Load dataset
+    dataset_cfg = load_dataset_cfg()
+    dataset = GreatApeDataset(dataset_cfg, 'validation', video_names, classes, device)
+    loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=None)
+    
+    # Loop...
+    for i, (spatial_data, temporal_data, labels, metadata) in enumerate(loader):
+
+                # Set gradients to zero
+                model.optimiser.zero_grad()
+
+                spatial_data = spatial_data.to(device)
+                temporal_data = temporal_data.to(device)
+                labels = labels.to(device)
+
+                # Compute the forward pass of the model
+                logits = model.model(spatial_data, temporal_data)
+                
+                print(spatial_data.shape)
+                print(logits.shape, labels.shape)
 if __name__ == '__main__':
     main()
