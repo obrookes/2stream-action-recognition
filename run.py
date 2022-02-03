@@ -11,6 +11,9 @@ from torch.utils.data import DataLoader
 # Progress bar
 from tqdm import tqdm
 
+# Saving things
+import pickle
+
 def load_dataset_cfg():
  
     cfg = {
@@ -146,7 +149,7 @@ def process_metadata(metadata, seq_length, pred, conf):
     assert(len(all_frames)==seq_length)
     return all_frames
 
-def run(loader, model, classes, device):
+def get_results(loader, model, classes, device):
 
     results = []
     model.model.eval()
@@ -162,14 +165,16 @@ def run(loader, model, classes, device):
 
             # Compute the forward pass of the model
             logits = model.model(spatial_data, temporal_data)
-
+            
+            # Process metadata
             pred = logits2label(logits, classes) 
             conf = logits2conf(logits)
             processed_metadata = process_metadata(metadata, 10, pred, conf)
             
-            print(processed_metadata)
-
+            # Add to results
             results.extend(processed_metadata)
+    
+    return results 
 
 def main():
      
@@ -187,8 +192,10 @@ def main():
     dataset = GreatApeDataset(dataset_cfg, 'validation', video_names, classes, device)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=None)
     
-    run(loader, fitted_model, classes, device)
-
+    results = get_results(loader, fitted_model, classes, device)
+    
+    with open('results.pkl', 'wb') as handle:
+        pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     main()
