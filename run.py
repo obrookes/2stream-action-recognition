@@ -4,6 +4,9 @@ import models.network as network
 import models.loss as loss
 import torch.nn.functional as F
 
+# Pandas
+import pandas as pd
+
 # Data
 from dataset.dataset import GreatApeDataset
 from torch.utils.data import DataLoader
@@ -14,13 +17,15 @@ from tqdm import tqdm
 # Saving things
 import pickle
 
+
+
 def load_dataset_cfg():
  
     cfg = {
          'dataset': 
             {
                 'sample_interval': 5,
-                'sequence_length': 10,
+                'sequence_length': 5,
                 'activity_duration_threshold':72
             },
           'paths': 
@@ -138,11 +143,11 @@ def process_metadata(metadata, seq_length, pred, conf):
         frame = {}
         
         # Add info
-        frame['frame'] = index
-        frame['filename'] = f"{video}_frame_{index}.jpg"
-        frame['pred'] = pred
-        frame['conf'] = conf
-        frame['bbox'] = [float(x) for x in bboxes[i]]
+        frame['file'] = f"{video}_frame_{index}.jpg"
+        frame['detections'] = {}
+        frame['detections']['label'] = pred
+        frame['detections']['conf'] = conf
+        frame['detections']['bbox'] = [float(x) for x in bboxes[i]]
         
         all_frames.append(frame)
 
@@ -169,12 +174,38 @@ def get_results(loader, model, classes, device):
             # Process metadata
             pred = logits2label(logits, classes) 
             conf = logits2conf(logits)
-            processed_metadata = process_metadata(metadata, 10, pred, conf)
+            processed_metadata = process_metadata(metadata, 5, pred, conf)
             
             # Add to results
             results.extend(processed_metadata)
     
     return results 
+
+def xyxy_to_normalised_xywh(xyxy, dims=(720, 404)):
+    """Converts [xmin, ymin, xmax, ymax] to normalised [x, y, w, h] """
+    dw = 1./dims[0]
+    dh = 1./dims[1]
+    x = xyxy[0]
+    y = xyxy[1] 
+    w = xyxy[2] - xyxy[0]
+    h = xyxy[3] - xyxy[1]
+    x = x*dw
+    w = w*dw
+    y = y*dh
+    h = h*dh
+    return [x,y,w,h]
+
+
+def format_results(results):
+    results = pd.DataFrame(results).groupby('file').agg(list).reset_index().to_dict(orient='records')
+    
+    for r in results:
+        for d in r['detections']:
+            d['bbox'] = xyxy_to_normalised_xywh(d['bbox'])
+    
+    results = {'images': results}
+    
+    return results
 
 def main():
      
@@ -193,9 +224,10 @@ def main():
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=None)
     
     results = get_results(loader, fitted_model, classes, device)
-    
-    with open('results.pkl', 'wb') as handle:
-        pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    formatted_results = format_results(results)
+
+    with open('fiveframe_results.pkl', 'wb') as handle:
+        pickle.dump(formatted_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     main()
