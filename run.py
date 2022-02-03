@@ -107,7 +107,12 @@ def logits2label(logits, classes):
     index = logits.max(1).indices
     return classes[index]
 
-def process_metadata(metadata, seq_length, pred):
+def logits2conf(logits):
+    probs = torch.nn.functional.softmax(logits, dim=1)
+    conf, _ = torch.max(probs, 1)
+    return conf.item()
+
+def process_metadata(metadata, seq_length, pred, conf):
 
     # Need to return bounding box too...
     # metadata = {"ape_id": ape_id, "start_frame": start_frame, "video": video, "bboxes": bboxes}
@@ -133,6 +138,7 @@ def process_metadata(metadata, seq_length, pred):
         frame['frame'] = index
         frame['filename'] = f"{video}_frame_{index}.jpg"
         frame['pred'] = pred
+        frame['conf'] = conf
         frame['bbox'] = [float(x) for x in bboxes[i]]
         
         all_frames.append(frame)
@@ -158,10 +164,11 @@ def run(loader, model, classes, device):
             logits = model.model(spatial_data, temporal_data)
 
             pred = logits2label(logits, classes) 
-            processed_metadata = process_metadata(metadata, 10, pred)
+            conf = logits2conf(logits)
+            processed_metadata = process_metadata(metadata, 10, pred, conf)
             
             print(processed_metadata)
-            
+
             results.extend(processed_metadata)
 
 def main():
