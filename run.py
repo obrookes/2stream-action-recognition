@@ -110,29 +110,34 @@ def logits2label(logits, classes):
 def process_metadata(metadata, seq_length, pred):
 
     # Need to return bounding box too...
-    # metadata = {"ape_id": ape_id, "start_frame": start_frame, "video": video}
+    # metadata = {"ape_id": ape_id, "start_frame": start_frame, "video": video, "bboxes": bboxes}
     
     # To store dict
     all_frames = []
 
     start = int(metadata['start_frame'].item())
-    end = start + seq_length + 1 # inclusive of final frame
+    end = start + seq_length # exclusive of final frame
     
     assert(len(metadata['video'])==1)
     video = metadata['video'][0]
 
-    for i in range(start, end):
+    bboxes = metadata['bboxes']
+    assert(len(bboxes)==seq_length)
+
+    for i, index in enumerate(range(start, end)):
 
         # Instatiate 'new' dict
         frame = {}
         
         # Add info
-        frame['frame'] = i
-        frame['filename'] = f"{video}_frame_{i}.jpg"
+        frame['frame'] = index
+        frame['filename'] = f"{video}_frame_{index}.jpg"
         frame['pred'] = pred
+        frame['bbox'] = [float(x) for x in bboxes[i]]
         
         all_frames.append(frame)
 
+    assert(len(all_frames)==seq_length)
     return all_frames
 
 def run(loader, model, classes, device):
@@ -154,7 +159,9 @@ def run(loader, model, classes, device):
 
             pred = logits2label(logits, classes) 
             processed_metadata = process_metadata(metadata, 10, pred)
-
+            
+            print(processed_metadata)
+            
             results.extend(processed_metadata)
 
 def main():
