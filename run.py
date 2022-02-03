@@ -8,8 +8,11 @@ import torch.nn.functional as F
 from dataset.dataset import GreatApeDataset
 from torch.utils.data import DataLoader
 
+# Progress bar
+from tqdm import tqdm
+
 def load_dataset_cfg():
-    
+ 
     cfg = {
          'dataset': 
             {
@@ -38,12 +41,12 @@ def load_dataset_cfg():
                 }
             }
         }
-    
+
     return cfg
 
 
 def load_model_cfg():
-    
+
     cfg = {
         "name": "twostream_LSTM",
         "mode": "train",
@@ -100,6 +103,60 @@ def load_weights(model, weights_path):
 
     return model
 
+def logits2label(logits, classes):
+    index = logits.max(1).indices
+    return classes[index]
+
+def process_metadata(metadata, seq_length, pred):
+
+    # Need to return bounding box too...
+    # metadata = {"ape_id": ape_id, "start_frame": start_frame, "video": video}
+    
+    # To store dict
+    all_frames = []
+
+    start = int(metadata['start_frame'].item())
+    end = start + seq_length + 1 # inclusive of final frame
+    
+    assert(len(metadata['video'])==1)
+    video = metadata['video'][0]
+
+    for i in range(start, end):
+
+        # Instatiate 'new' dict
+        frame = {}
+        
+        # Add info
+        frame['frame'] = i
+        frame['filename'] = f"{video}_frame_{i}.jpg"
+        frame['pred'] = pred
+        
+        all_frames.append(frame)
+
+    return all_frames
+
+def run(loader, model, classes, device):
+
+    results = []
+    model.model.eval()
+
+    with torch.no_grad():
+        for spatial_data, temporal_data, labels, metadata in tqdm(loader):
+            # Set gradients to zero
+            model.optimiser.zero_grad()
+
+            spatial_data = spatial_data.to(device)
+            temporal_data = temporal_data.to(device)
+            labels = labels.to(device)
+
+            # Compute the forward pass of the model
+            logits = model.model(spatial_data, temporal_data)
+
+            pred = logits2label(logits, classes) 
+            processed_metadata = process_metadata(metadata, 10, pred)
+
+            results.extend(processed_metadata)
+
 def main():
      
     cfg = load_model_cfg()
@@ -116,20 +173,8 @@ def main():
     dataset = GreatApeDataset(dataset_cfg, 'validation', video_names, classes, device)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=None)
     
-    # Loop...
-    for i, (spatial_data, temporal_data, labels, metadata) in enumerate(loader):
+    run(loader, fitted_model, classes, device)
 
-                # Set gradients to zero
-                model.optimiser.zero_grad()
 
-                spatial_data = spatial_data.to(device)
-                temporal_data = temporal_data.to(device)
-                labels = labels.to(device)
-
-                # Compute the forward pass of the model
-                logits = model.model(spatial_data, temporal_data)
-                
-                print(spatial_data.shape)
-                print(logits.shape, labels.shape)
 if __name__ == '__main__':
     main()
