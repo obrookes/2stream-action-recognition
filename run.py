@@ -24,8 +24,8 @@ def load_dataset_cfg():
     cfg = {
          'dataset': 
             {
-                'sample_interval': 5,
-                'sequence_length': 5,
+                'sample_interval': 20,
+                'sequence_length': 20,
                 'activity_duration_threshold':72
             },
           'paths': 
@@ -174,12 +174,46 @@ def get_results(loader, model, classes, device):
             # Process metadata
             pred = logits2label(logits, classes) 
             conf = logits2conf(logits)
-            processed_metadata = process_metadata(metadata, 5, pred, conf)
+            processed_metadata = process_metadata(metadata, 20, pred, conf)
+            
+            probs = torch.nn.functional.softmax(logits, dim=1)
+            conf, index = torch.max(probs, 1)
             
             # Add to results
             results.extend(processed_metadata)
     
     return results 
+
+def log_results(loader, model, classes, device):
+
+    results = {'preds': [], 'labels': []}
+
+    model.model.eval()
+
+    with torch.no_grad():
+        for spatial_data, temporal_data, labels, metadata in tqdm(loader):
+            # Set gradients to zero
+            model.optimiser.zero_grad()
+
+            spatial_data = spatial_data.to(device)
+            temporal_data = temporal_data.to(device)
+            labels = labels.to(device)
+
+            # Compute the forward pass of the model
+            logits = model.model(spatial_data, temporal_data)
+            
+            # Process metadata
+            pred = logits2label(logits, classes) 
+            conf = logits2conf(logits)
+            processed_metadata = process_metadata(metadata, 20, pred, conf)
+            
+            probs = torch.nn.functional.softmax(logits, dim=1)
+            conf, index = torch.max(probs, 1)
+            
+            results['preds'].append(index.item())
+            results['labels'].append(labels.item())
+    
+    return results
 
 def xyxy_to_normalised_xywh(xyxy, dims=(720, 404)):
     """Converts [xmin, ymin, xmax, ymax] to normalised [x, y, w, h] """
@@ -223,11 +257,13 @@ def main():
     dataset = GreatApeDataset(dataset_cfg, 'validation', video_names, classes, device)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=None)
     
-    results = get_results(loader, fitted_model, classes, device)
-    formatted_results = format_results(results)
+    logged_results = log_results(loader, fitted_model, classes, device)
+ 
+    # results = get_results(loader, fitted_model, classes, device)
+    # formatted_results = format_results(results)
 
-    with open('fiveframe_results.pkl', 'wb') as handle:
-        pickle.dump(formatted_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open('logged_results.pkl', 'wb') as handle:
+        pickle.dump(logged_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     main()
