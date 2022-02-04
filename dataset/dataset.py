@@ -97,6 +97,9 @@ class GreatApeDataset(torch.utils.data.Dataset):
     # Get the ith (index) sample from the dataset
     def __getitem__(self, index):
 
+        # Store bounding boxes
+        bboxes = []
+
         # Get details of required sample
         video, ape_id, start_frame, activity = find_sample(self.samples, index)
 
@@ -118,6 +121,9 @@ class GreatApeDataset(torch.utils.data.Dataset):
             # Get ape and its coordinates
             ape = get_ape_by_id(self.annotations_dir, video, start_frame + i, ape_id)
             coordinates = get_ape_coordinates(ape)
+            
+            # Store in bboxes
+            bboxes.append(coordinates)
 
             # Crop around ape
             spatial_image = spatial_image.crop(
@@ -204,7 +210,7 @@ class GreatApeDataset(torch.utils.data.Dataset):
         """
         Metadata relating to sample
         """
-        metadata = {"ape_id": ape_id, "start_frame": start_frame, "video": video}
+        metadata = {"ape_id": ape_id, "start_frame": start_frame, "video": video, "bboxes": bboxes}
 
         return spatial_sample, temporal_sample, label, metadata
 

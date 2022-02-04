@@ -4,17 +4,28 @@ import models.network as network
 import models.loss as loss
 import torch.nn.functional as F
 
+# Pandas
+import pandas as pd
+
 # Data
 from dataset.dataset import GreatApeDataset
 from torch.utils.data import DataLoader
 
+# Progress bar
+from tqdm import tqdm
+
+# Saving things
+import pickle
+
+
+
 def load_dataset_cfg():
-    
+ 
     cfg = {
          'dataset': 
             {
                 'sample_interval': 5,
-                'sequence_length': 10,
+                'sequence_length': 5,
                 'activity_duration_threshold':72
             },
           'paths': 
@@ -38,12 +49,12 @@ def load_dataset_cfg():
                 }
             }
         }
-    
+
     return cfg
 
 
 def load_model_cfg():
-    
+
     cfg = {
         "name": "twostream_LSTM",
         "mode": "train",
@@ -100,6 +111,102 @@ def load_weights(model, weights_path):
 
     return model
 
+def logits2label(logits, classes):
+    index = logits.max(1).indices
+    return classes[index]
+
+def logits2conf(logits):
+    probs = torch.nn.functional.softmax(logits, dim=1)
+    conf, _ = torch.max(probs, 1)
+    return conf.item()
+
+def process_metadata(metadata, seq_length, pred, conf):
+
+    # Need to return bounding box too...
+    # metadata = {"ape_id": ape_id, "start_frame": start_frame, "video": video, "bboxes": bboxes}
+    
+    # To store dict
+    all_frames = []
+
+    start = int(metadata['start_frame'].item())
+    end = start + seq_length # exclusive of final frame
+    
+    assert(len(metadata['video'])==1)
+    video = metadata['video'][0]
+
+    bboxes = metadata['bboxes']
+    assert(len(bboxes)==seq_length)
+
+    for i, index in enumerate(range(start, end)):
+
+        # Instatiate 'new' dict
+        frame = {}
+        
+        # Add info
+        frame['file'] = f"{video}_frame_{index}.jpg"
+        frame['detections'] = {}
+        frame['detections']['label'] = pred
+        frame['detections']['conf'] = conf
+        frame['detections']['bbox'] = [float(x) for x in bboxes[i]]
+        
+        all_frames.append(frame)
+
+    assert(len(all_frames)==seq_length)
+    return all_frames
+
+def get_results(loader, model, classes, device):
+
+    results = []
+    model.model.eval()
+
+    with torch.no_grad():
+        for spatial_data, temporal_data, labels, metadata in tqdm(loader):
+            # Set gradients to zero
+            model.optimiser.zero_grad()
+
+            spatial_data = spatial_data.to(device)
+            temporal_data = temporal_data.to(device)
+            labels = labels.to(device)
+
+            # Compute the forward pass of the model
+            logits = model.model(spatial_data, temporal_data)
+            
+            # Process metadata
+            pred = logits2label(logits, classes) 
+            conf = logits2conf(logits)
+            processed_metadata = process_metadata(metadata, 5, pred, conf)
+            
+            # Add to results
+            results.extend(processed_metadata)
+    
+    return results 
+
+def xyxy_to_normalised_xywh(xyxy, dims=(720, 404)):
+    """Converts [xmin, ymin, xmax, ymax] to normalised [x, y, w, h] """
+    dw = 1./dims[0]
+    dh = 1./dims[1]
+    x = xyxy[0]
+    y = xyxy[1] 
+    w = xyxy[2] - xyxy[0]
+    h = xyxy[3] - xyxy[1]
+    x = x*dw
+    w = w*dw
+    y = y*dh
+    h = h*dh
+    return [x,y,w,h]
+
+
+def format_results(results):
+    results = pd.DataFrame(results).groupby('file').agg(list).reset_index().to_dict(orient='records')
+    
+    for r in results:
+        for d in r['detections']:
+            d['bbox'] = xyxy_to_normalised_xywh(d['bbox'])
+    
+    results = {'images': results}
+    
+    return results
+
 def main():
      
     cfg = load_model_cfg()
@@ -116,20 +223,11 @@ def main():
     dataset = GreatApeDataset(dataset_cfg, 'validation', video_names, classes, device)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=None)
     
-    # Loop...
-    for i, (spatial_data, temporal_data, labels, metadata) in enumerate(loader):
+    results = get_results(loader, fitted_model, classes, device)
+    formatted_results = format_results(results)
 
-                # Set gradients to zero
-                model.optimiser.zero_grad()
+    with open('fiveframe_results.pkl', 'wb') as handle:
+        pickle.dump(formatted_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-                spatial_data = spatial_data.to(device)
-                temporal_data = temporal_data.to(device)
-                labels = labels.to(device)
-
-                # Compute the forward pass of the model
-                logits = model.model(spatial_data, temporal_data)
-                
-                print(spatial_data.shape)
-                print(logits.shape, labels.shape)
 if __name__ == '__main__':
     main()
