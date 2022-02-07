@@ -120,13 +120,14 @@ def logits2conf(logits):
     conf, _ = torch.max(probs, 1)
     return conf.item()
 
-def process_metadata(metadata, seq_length, pred, conf):
+def process_metadata(metadata, seq_length, label, pred, conf):
 
     # Need to return bounding box too...
     # metadata = {"ape_id": ape_id, "start_frame": start_frame, "video": video, "bboxes": bboxes}
     
     # To store dict
-    all_frames = []
+    pred_frames = []
+    gt_frames = []
 
     start = int(metadata['start_frame'].item())
     end = start + seq_length # exclusive of final frame
@@ -140,23 +141,34 @@ def process_metadata(metadata, seq_length, pred, conf):
     for i, index in enumerate(range(start, end)):
 
         # Instatiate 'new' dict
-        frame = {}
+        pframe = {}
+        gtframe = {}
         
-        # Add info
-        frame['file'] = f"{video}_frame_{index}.jpg"
-        frame['detections'] = {}
-        frame['detections']['label'] = pred
-        frame['detections']['conf'] = conf
-        frame['detections']['bbox'] = [float(x) for x in bboxes[i]]
-        
-        all_frames.append(frame)
+        # Add gt info
+        gtframe['file'] = f"{video}_frame_{index}.jpg"
+        gtframe['detections'] = {}
+        gtframe['detections']['label'] = label
+        gtframe['detections']['bbox'] = [float(x) for x in bboxes[i]]
 
-    assert(len(all_frames)==seq_length)
-    return all_frames
+        # Add pred info
+        pframe['file'] = f"{video}_frame_{index}.jpg"
+        pframe['detections'] = {}
+        pframe['detections']['label'] = pred
+        pframe['detections']['conf'] = conf
+        pframe['detections']['bbox'] = [float(x) for x in bboxes[i]]
+        
+        gt_frames.append(gtframe)
+        pred_frames.append(pframe)
+        
+    assert(len(pred_frames)==len(gt_frames))
+    assert(len(pred_frames)==seq_length)
+    
+    return gt_frames, pred_frames
 
 def get_results(loader, model, classes, device):
 
-    results = []
+    results = {'gts': [], 'preds': []}
+
     model.model.eval()
 
     with torch.no_grad():
@@ -171,22 +183,23 @@ def get_results(loader, model, classes, device):
             # Compute the forward pass of the model
             logits = model.model(spatial_data, temporal_data)
             
+            # Get text label
+            label = classes[labels.item()]
+
             # Process metadata
             pred = logits2label(logits, classes) 
             conf = logits2conf(logits)
-            processed_metadata = process_metadata(metadata, 20, pred, conf)
-            
-            probs = torch.nn.functional.softmax(logits, dim=1)
-            conf, index = torch.max(probs, 1)
+            gt, pred = process_metadata(metadata, 20, label, pred, conf)
             
             # Add to results
-            results.extend(processed_metadata)
-    
+            results['gts'].extend(gt)
+            results['preds'].extend(pred)
+
     return results 
 
 def log_results(loader, model, classes, device):
 
-    results = {'preds': [], 'labels': []}
+    results = {'preds': [], 'conf': [], 'labels': []}
 
     model.model.eval()
 
@@ -205,12 +218,12 @@ def log_results(loader, model, classes, device):
             # Process metadata
             pred = logits2label(logits, classes) 
             conf = logits2conf(logits)
-            processed_metadata = process_metadata(metadata, 20, pred, conf)
             
             probs = torch.nn.functional.softmax(logits, dim=1)
             conf, index = torch.max(probs, 1)
             
             results['preds'].append(index.item())
+            results['conf'].append(probs.tolist())
             results['labels'].append(labels.item())
     
     return results
@@ -231,6 +244,7 @@ def xyxy_to_normalised_xywh(xyxy, dims=(720, 404)):
 
 
 def format_results(results):
+
     results = pd.DataFrame(results).groupby('file').agg(list).reset_index().to_dict(orient='records')
     
     for r in results:
@@ -240,6 +254,11 @@ def format_results(results):
     results = {'images': results}
     
     return results
+
+def format_result_dict(results):
+    gt_results = format_results(results['gts'])
+    pred_results = format_results(results['preds'])
+    return gt_results, pred_results
 
 def main():
      
@@ -257,13 +276,23 @@ def main():
     dataset = GreatApeDataset(dataset_cfg, 'validation', video_names, classes, device)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=None)
     
-    logged_results = log_results(loader, fitted_model, classes, device)
- 
-    # results = get_results(loader, fitted_model, classes, device)
-    # formatted_results = format_results(results)
+    mode='log'
 
-    with open('logged_results.pkl', 'wb') as handle:
-        pickle.dump(logged_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    if(mode=='log'):
+        logged_results = log_results(loader, fitted_model, classes, device)
+        
+        with open('logged_results_20frames.pkl', 'wb') as handle:
+                pickle.dump(logged_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    else:
+        results = get_results(loader, fitted_model, classes, device)
+        gts, preds = format_result_dict(results)
+
+        with open('gt.pkl', 'wb') as handle:
+            pickle.dump(gts, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+        with open('pred.pkl', 'wb') as handle:
+            pickle.dump(preds, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     main()
