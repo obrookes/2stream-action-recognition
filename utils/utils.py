@@ -4,14 +4,12 @@ import numpy as np
 import shutil
 import glob
 import cv2
-import boto3
 import argparse
 import json
 from tqdm import tqdm
 from typing import NamedTuple
 from zipfile import ZipFile
 from PIL import ImageFont, ImageDraw, Image
-from botocore.exceptions import ClientError
 
 from utils.data import *
 
