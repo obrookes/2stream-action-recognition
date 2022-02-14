@@ -1,6 +1,7 @@
 # Models
 import torch
 import models.network as network
+from models.resnet_3d import VideoClassificationLightningModule
 import models.loss as loss
 import torch.nn.functional as F
 
@@ -16,7 +17,6 @@ from tqdm import tqdm
 
 # Saving things
 import pickle
-
 
 
 def load_dataset_cfg():
@@ -97,7 +97,16 @@ def get_device():
 
     return device
 
-def load_model(cfg, device):
+
+def load_3dresnet_model(ckpt_path):
+    
+    model = VideoClassificationLightningModule.load_from_checkpoint(
+            checkpoint_path=ckpt_path,
+            model_name='slow_r50')
+
+    return model
+
+def load_2stream_model(cfg, device):
     return network.CNN(cfg=cfg, loss='focal', num_classes=9, device=device)
 
 def load_weights(model, weights_path):
@@ -165,24 +174,35 @@ def process_metadata(metadata, seq_length, label, pred, conf):
     
     return gt_frames, pred_frames
 
-def get_results(loader, model, classes, device):
+def get_results(loader, model_name, model, classes, device):
 
     results = {'gts': [], 'preds': []}
-
-    model.model.eval()
+    
+    if(model_name=='2stream'):
+        model.model.eval()
+    elif(model_name=='3dresnet'):
+        model.eval()
 
     with torch.no_grad():
         for spatial_data, temporal_data, labels, metadata in tqdm(loader):
+            
             # Set gradients to zero
-            model.optimiser.zero_grad()
+            if(model_name=='2stream'):
+                model.optimiser.zero_grad()
+            elif(model_name=='3dresnet'):
+                model.zero_grad()
 
             spatial_data = spatial_data.to(device)
             temporal_data = temporal_data.to(device)
             labels = labels.to(device)
-
-            # Compute the forward pass of the model
-            logits = model.model(spatial_data, temporal_data)
             
+            # Compute the forward pass of the model
+            if(model_name=='2stream'):
+            # Set gradients to zero
+                logits = model.model(spatial_data, temporal_data)
+            elif(model_name=='3dresnet'):
+                logits = model.forward(spatial_data.permute(dims=(0, 2, 1, 3, 4)))
+           
             # Get text label
             label = classes[labels.item()]
 
@@ -197,24 +217,35 @@ def get_results(loader, model, classes, device):
 
     return results 
 
-def log_results(loader, model, classes, device):
+def log_results(loader, model_name, model, classes, device):
 
     results = {'preds': [], 'conf': [], 'labels': []}
 
-    model.model.eval()
+    if(model_name=='2stream'):
+        model.model.eval()
+    elif(model_name=='3dresnet'):
+        model.eval()
 
     with torch.no_grad():
         for spatial_data, temporal_data, labels, metadata in tqdm(loader):
-            # Set gradients to zero
-            model.optimiser.zero_grad()
+
+            # Set gradients to zero            
+            if(model_name=='2stream'):
+                model.optimiser.zero_grad()
+            elif(model_name=='3dresnet'):
+                model.zero_grad()
 
             spatial_data = spatial_data.to(device)
             temporal_data = temporal_data.to(device)
             labels = labels.to(device)
 
             # Compute the forward pass of the model
-            logits = model.model(spatial_data, temporal_data)
-            
+            if(model_name=='2stream'):
+            # Set gradients to zero
+                logits = model.model(spatial_data, temporal_data)
+            elif(model_name=='3dresnet'):
+                logits = model.forward(spatial_data.permute(dims=(0, 2, 1, 3, 4)))
+
             # Process metadata
             pred = logits2label(logits, classes) 
             conf = logits2conf(logits)
@@ -264,35 +295,39 @@ def main():
      
     cfg = load_model_cfg()
     device = get_device()
-    model = load_model(cfg, device)
-    fitted_model = load_weights(model, 'weights/twostream_LSTM/model')
 
-    video_names = '/home/dl18206/Desktop/phd/code/personal/ape-behaviour-triplet-network/splits/valdata.txt'
+    ckpt_path = '/home/dl18206/Desktop/phd/code/personal/pan-africa-annotation/ape-behaviour-recognition/checkpoints/baseline/top1_acc_epoch=151.ckpt'
+
+    model_name = '3dresnet'
+
+    if(model_name=='2stream'):
+        model = load_2stream_model(cfg, device)
+        model = load_weights(model, 'weights/twostream_LSTM/model')
+    elif(model_name=='3dresnet'):
+       model = load_3dresnet_model(ckpt_path) 
+    
+    video_names = '/home/dl18206/Desktop/phd/code/personal/ape-behaviour-triplet-network/splits/testdata.txt'
     classes_path = '/home/dl18206/Desktop/phd/code/personal/ape-behaviour-triplet-network/classes.txt'
     classes = open(classes_path).read().strip().split()
     
     # Load dataset
     dataset_cfg = load_dataset_cfg()
-    dataset = GreatApeDataset(dataset_cfg, 'validation', video_names, classes, device)
+    dataset = GreatApeDataset(dataset_cfg, 'test', video_names, classes, device)
     loader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1, sampler=None)
     
-    mode='log'
-
-    if(mode=='log'):
-        logged_results = log_results(loader, fitted_model, classes, device)
+    logged_results = log_results(loader, model_name, model, classes, device)
         
-        with open('logged_results_20frames.pkl', 'wb') as handle:
-                pickle.dump(logged_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open('resnet_3d_test.pkl', 'wb') as handle:
+        pickle.dump(logged_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    else:
-        results = get_results(loader, fitted_model, classes, device)
-        gts, preds = format_result_dict(results)
+    results = get_results(loader, model_name, model, classes, device)
+    gts, preds = format_result_dict(results)
 
-        with open('gt.pkl', 'wb') as handle:
-            pickle.dump(gts, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open('resnet_3d_gt_test.pkl', 'wb') as handle:
+        pickle.dump(gts, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-        with open('pred.pkl', 'wb') as handle:
-            pickle.dump(preds, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    with open('resnet_3d_pred_test.pkl', 'wb') as handle:
+        pickle.dump(preds, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
     main()
