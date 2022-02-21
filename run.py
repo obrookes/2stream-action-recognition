@@ -298,7 +298,7 @@ def main():
 
     ckpt_path = '/home/dl18206/Desktop/phd/code/personal/pan-africa-annotation/ape-behaviour-recognition/checkpoints/baseline/top1_acc_epoch=151.ckpt'
 
-    model_name = '3dresnet'
+    model_name = '2stream'
 
     if(model_name=='2stream'):
         model = load_2stream_model(cfg, device)
@@ -317,16 +317,16 @@ def main():
     
     logged_results = log_results(loader, model_name, model, classes, device)
         
-    with open('resnet_3d_test.pkl', 'wb') as handle:
+    with open('two_stream_test.pkl', 'wb') as handle:
         pickle.dump(logged_results, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     results = get_results(loader, model_name, model, classes, device)
     gts, preds = format_result_dict(results)
 
-    with open('resnet_3d_gt_test.pkl', 'wb') as handle:
+    with open('two_stream_gt_test.pkl', 'wb') as handle:
         pickle.dump(gts, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    with open('resnet_3d_pred_test.pkl', 'wb') as handle:
+    with open('two_stream_pred_test.pkl', 'wb') as handle:
         pickle.dump(preds, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__ == '__main__':
